@@ -861,3 +861,1150 @@
             } catch (error) {
                 console.error('Camera error:', error);
                 showNotification('Error accediendo a la cámara: ' + error.message, 'error');
+
+                stopQRScan();
+           }
+       }
+
+       function scanQRCode(video) {
+           if (!scanningQR || !video.videoWidth) return;
+           
+           try {
+               const canvas = document.createElement('canvas');
+               const context = canvas.getContext('2d');
+               
+               if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                   canvas.height = video.videoHeight;
+                   canvas.width = video.videoWidth;
+                   context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                   
+                   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                   
+                   if (typeof jsQR !== 'undefined') {
+                       const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                           inversionAttempts: "dontInvert",
+                       });
+                       
+                       if (code && code.data) {
+                           processQRData(code.data);
+                           stopQRScan();
+                           return;
+                       }
+                   }
+               }
+           } catch (error) {
+               console.error('QR scanning error:', error);
+           }
+           
+           if (scanningQR) {
+               requestAnimationFrame(() => scanQRCode(video));
+           }
+       }
+
+       function processQRData(data) {
+           try {
+               console.log('QR Data detected:', data);
+               
+               if (data.startsWith('BEGIN:VCARD')) {
+                   const vcard = parseVCard(data);
+                   fillFormFromQR(vcard);
+                   showNotification('✓ vCard escaneado exitosamente!');
+               }
+               else if (data.includes('vcard') || data.includes('.vcf')) {
+                   fillFormFromQR({ contactLink: data, linkType: 'vCard' });
+                   showNotification('✓ Link vCard detectado!');
+               }
+               else if (data.includes('wa.me') || data.includes('whatsapp.com') || data.includes('api.whatsapp.com')) {
+                   const whatsappData = extractWhatsAppData(data);
+                   whatsappData.contactLink = data;
+                   whatsappData.linkType = 'WhatsApp';
+                   fillFormFromQR(whatsappData);
+                   showNotification('✓ WhatsApp escaneado exitosamente!');
+               }
+               else if (data.includes('linkedin.com')) {
+                   fillFormFromQR({ linkedin: data });
+                   showNotification('✓ LinkedIn detectado!');
+               }
+               else if (data.includes('mailto:')) {
+                   const email = data.replace('mailto:', '').split('?')[0];
+                   fillFormFromQR({ email, contactLink: data, linkType: 'Email' });
+                   showNotification('✓ Email detectado!');
+               }
+               else if (data.match(/^\+?[\d\s\-\(\)]+$/)) {
+                   fillFormFromQR({ phone: data });
+                   showNotification('✓ Teléfono detectado!');
+               }
+               else if (data.match(/^https?:\/\//)) {
+                   fillFormFromQR({ contactLink: data, description: 'URL escaneada: ' + data });
+                   showNotification('✓ URL detectada!');
+               }
+               else {
+                   fillFormFromQR({ description: 'QR escaneado: ' + data });
+                   showNotification('✓ QR escaneado - datos guardados');
+               }
+               
+               vibrate([200, 100, 200]);
+               
+           } catch (error) {
+               console.error('Error processing QR data:', error);
+               fillFormFromQR({ description: 'QR escaneado: ' + data });
+               showNotification('QR escaneado - datos guardados en descripción');
+           }
+       }
+
+       function parseVCard(vcard) {
+           const result = {};
+           const lines = vcard.split(/\r?\n/);
+           
+           lines.forEach(line => {
+               const trimmedLine = line.trim();
+               if (trimmedLine.startsWith('FN:')) {
+                   result.name = trimmedLine.substring(3);
+               } else if (trimmedLine.startsWith('ORG:')) {
+                   result.company = trimmedLine.substring(4);
+               } else if (trimmedLine.startsWith('EMAIL')) {
+                   const emailPart = trimmedLine.split(':');
+                   if (emailPart.length > 1) {
+                       result.email = emailPart[1];
+                   }
+               } else if (trimmedLine.startsWith('TEL')) {
+                   const telPart = trimmedLine.split(':');
+                   if (telPart.length > 1) {
+                       result.phone = telPart[1];
+                   }
+               } else if (trimmedLine.startsWith('URL') && trimmedLine.includes('linkedin')) {
+                   const urlPart = trimmedLine.split(':');
+                   if (urlPart.length > 1) {
+                       result.linkedin = urlPart.slice(1).join(':');
+                   }
+               }
+           });
+           
+           return result;
+       }
+
+       function extractWhatsAppData(url) {
+           const result = {};
+           
+           try {
+               console.log('Processing WhatsApp URL:', url);
+               
+               let phoneMatch = url.match(/(?:wa\.me\/|phone=)(\+?\d{8,15})/);
+               
+               if (!phoneMatch) {
+                   phoneMatch = url.match(/whatsapp:\/\/send\?phone=(\+?\d{8,15})/);
+               }
+               if (!phoneMatch) {
+                   phoneMatch = url.match(/api\.whatsapp\.com\/send\?phone=(\+?\d{8,15})/);
+               }
+               if (!phoneMatch) {
+                   phoneMatch = url.match(/(\+?\d{10,15})/);
+               }
+               
+               if (phoneMatch) {
+                   result.phone = phoneMatch[1];
+                   if (!result.phone.startsWith('+')) {
+                       result.phone = '+' + result.phone;
+                   }
+                   console.log('Phone extracted:', result.phone);
+               }
+               
+               let textMatch = url.match(/text=([^&]*)/);
+               if (textMatch) {
+                   try {
+                       const decodedText = decodeURIComponent(textMatch[1].replace(/\+/g, ' '));
+                       result.description = 'Mensaje WhatsApp: ' + decodedText;
+                       
+                       if (decodedText.length < 50 && !decodedText.match(/\d/) && decodedText.split(' ').length <= 3) {
+                           result.name = decodedText;
+                       }
+                       console.log('Text extracted:', decodedText);
+                   } catch (decodeError) {
+                       console.warn('Error decoding text:', decodeError);
+                   }
+               }
+               
+               if (!result.phone) {
+                   result.description = 'WhatsApp QR: ' + url;
+                   console.warn('No phone number found in URL');
+               }
+               
+           } catch (error) {
+               console.error('Error parsing WhatsApp URL:', error);
+               result.description = 'WhatsApp QR: ' + url;
+           }
+           
+           return result;
+       }
+
+       function stopQRScan() {
+           scanningQR = false;
+           const video = document.getElementById('qr-video');
+           const scanBtn = document.getElementById('scanQRBtn');
+           
+           if (video.srcObject) {
+               video.srcObject.getTracks().forEach(track => track.stop());
+               video.srcObject = null;
+           }
+           
+           document.getElementById('cameraContainer').classList.add('hidden');
+           scanBtn.textContent = '📸 Escanear Código QR';
+           scanBtn.onclick = startQRScan;
+           
+           vibrate([50]);
+       }
+
+       function fillFormFromQR(data) {
+           if (data.name) {
+               document.getElementById('leadName').value = data.name;
+               console.log('Nombre capturado:', data.name);
+           }
+           if (data.company) {
+               document.getElementById('leadCompany').value = data.company;
+               console.log('Empresa capturada:', data.company);
+           }
+           if (data.email) {
+               document.getElementById('leadEmail').value = data.email;
+               console.log('Email capturado:', data.email);
+           }
+           if (data.phone) {
+               document.getElementById('leadPhone').value = data.phone;
+               console.log('Teléfono capturado:', data.phone);
+           }
+           if (data.linkedin) {
+               document.getElementById('leadLinkedIn').value = data.linkedin;
+               console.log('LinkedIn capturado:', data.linkedin);
+           }
+           if (data.contactLink) {
+               document.getElementById('leadContactLink').value = data.contactLink;
+               document.getElementById('openContactLink').classList.remove('hidden');
+               
+               if (data.linkType === 'WhatsApp') {
+                   document.getElementById('sendWhatsAppMessage').classList.remove('hidden');
+               } else {
+                   document.getElementById('sendWhatsAppMessage').classList.add('hidden');
+               }
+               
+               const button = document.getElementById('openContactLink');
+               if (data.linkType === 'WhatsApp') {
+                   button.innerHTML = '💬 Abrir WhatsApp';
+               } else if (data.linkType === 'vCard') {
+                   button.innerHTML = '📇 Abrir vCard';
+               } else if (data.linkType === 'Email') {
+                   button.innerHTML = '📧 Abrir Email';
+               } else {
+                   button.innerHTML = '🔗 Abrir Link';
+               }
+               console.log('Link de contacto capturado:', data.contactLink);
+           }
+           if (data.description) {
+               const currentDesc = document.getElementById('leadDescription').value;
+               const newDesc = currentDesc ? currentDesc + '\n' + data.description : data.description;
+               document.getElementById('leadDescription').value = newDesc;
+               console.log('Descripción agregada:', data.description);
+           }
+       }
+
+       function openContactLink() {
+           const link = document.getElementById('leadContactLink').value;
+           if (link) {
+               try {
+                   window.open(link, '_blank', 'noopener,noreferrer');
+                   vibrate([100]);
+               } catch (error) {
+                   console.error('Error opening link:', error);
+                   showNotification('Error abriendo el link', 'error');
+               }
+           }
+       }
+
+       // Template management
+       const defaultTemplates = {
+           default: `Hola {nombre}! 👋
+
+Fue un placer conocerte en el evento. Soy {miNombre} de {miEmpresa}.
+
+Como conversamos, creo que podemos ayudarte con {oportunidad}. 
+
+¿Te parece si agendamos una llamada de 30 min esta semana para platicar más a detalle?
+
+Mis datos:
+📞 {miTelefono}
+📧 {miEmail}
+
+¡Saludos!`,
+
+           formal: `Estimado/a {nombre},
+
+Fue un placer conocerle en el evento. Mi nombre es {miNombre} y represento a {miEmpresa}.
+
+Basándome en nuestra conversación sobre {oportunidad}, creo que podríamos explorar oportunidades de colaboración.
+
+Me gustaría proponer una reunión de 30 minutos para discutir cómo podemos agregar valor a su organización.
+
+Quedo a su disposición:
+Teléfono: {miTelefono}
+Email: {miEmail}
+
+Cordialmente,
+{miNombre}`,
+
+           casual: `¡Hola {nombre}! 😊
+
+¡Qué bueno conocerte en el evento! Soy {miNombre} de {miEmpresa}.
+
+Me encantó nuestra charla sobre {oportunidad}. 
+
+¿Qué te parece si nos tomamos un café virtual esta semana para seguir platicando?
+
+Aquí mis datos:
+📱 {miTelefono}
+✉️ {miEmail}
+
+¡Espero tu respuesta!
+
+{miNombre}`,
+
+           custom: `Personaliza tu mensaje aquí...
+
+Usa las variables:
+- {nombre} para el nombre del contacto
+- {miNombre} para tu nombre
+- {miEmpresa} para tu empresa
+- etc.`
+       };
+
+       function loadSelectedTemplate() {
+           const selectedTemplate = document.getElementById('templateSelector').value;
+           const template = defaultTemplates[selectedTemplate] || defaultTemplates.default;
+           document.getElementById('whatsappTemplate').value = template;
+           vibrate([30]);
+       }
+
+       function createNewTemplate() {
+           const templateName = prompt('Nombre para la nueva plantilla:');
+           if (templateName && templateName.trim()) {
+               const selector = document.getElementById('templateSelector');
+               const option = document.createElement('option');
+               option.value = templateName.toLowerCase().replace(/\s+/g, '_');
+               option.textContent = templateName;
+               selector.appendChild(option);
+               selector.value = option.value;
+               
+               document.getElementById('whatsappTemplate').value = 'Nueva plantilla - personaliza tu mensaje aquí...';
+               showNotification('Nueva plantilla creada');
+               vibrate([100]);
+           }
+       }
+
+       function saveCurrentTemplate() {
+           try {
+               const templateData = {
+                   senderName: document.getElementById('senderName').value,
+                   senderCompany: document.getElementById('senderCompany').value,
+                   senderPhone: document.getElementById('senderPhone').value,
+                   senderEmail: document.getElementById('senderEmail').value,
+                   selectedTemplate: document.getElementById('templateSelector').value,
+                   customTemplate: document.getElementById('whatsappTemplate').value
+               };
+               
+               localStorage.setItem(`config_${currentUser}`, JSON.stringify(templateData));
+               showNotification('✓ Configuración guardada exitosamente!');
+               vibrate([100, 50, 100]);
+           } catch (error) {
+               console.error('Error saving template:', error);
+               showNotification('Error guardando configuración', 'error');
+           }
+       }
+
+       function loadConfiguration() {
+           try {
+               const saved = localStorage.getItem(`config_${currentUser}`);
+               if (saved) {
+                   const data = JSON.parse(saved);
+                   document.getElementById('senderName').value = data.senderName || '';
+                   document.getElementById('senderCompany').value = data.senderCompany || '';
+                   document.getElementById('senderPhone').value = data.senderPhone || '';
+                   document.getElementById('senderEmail').value = data.senderEmail || '';
+                   document.getElementById('templateSelector').value = data.selectedTemplate || 'default';
+                   document.getElementById('whatsappTemplate').value = data.customTemplate || defaultTemplates.default;
+               } else {
+                   document.getElementById('whatsappTemplate').value = defaultTemplates.default;
+               }
+           } catch (error) {
+               console.error('Error loading configuration:', error);
+               document.getElementById('whatsappTemplate').value = defaultTemplates.default;
+           }
+       }
+
+       function previewTemplate() {
+           const template = document.getElementById('whatsappTemplate').value;
+           const senderName = document.getElementById('senderName').value || '[Tu Nombre]';
+           const senderCompany = document.getElementById('senderCompany').value || '[Tu Empresa]';
+           const senderPhone = document.getElementById('senderPhone').value || '[Tu Teléfono]';
+           const senderEmail = document.getElementById('senderEmail').value || '[Tu Email]';
+           
+           const preview = template
+               .replace(/{nombre}/g, '[Nombre del Contacto]')
+               .replace(/{empresa}/g, '[Empresa del Contacto]')
+               .replace(/{miNombre}/g, senderName)
+               .replace(/{miEmpresa}/g, senderCompany)
+               .replace(/{miTelefono}/g, senderPhone)
+               .replace(/{miEmail}/g, senderEmail)
+               .replace(/{oportunidad}/g, '[Descripción de la Oportunidad]');
+           
+           showModal('Vista Previa del Mensaje', preview);
+           vibrate([50]);
+       }
+
+       function showModal(title, content) {
+           const modal = document.createElement('div');
+           modal.style.cssText = `
+               position: fixed;
+               top: 0;
+               left: 0;
+               width: 100%;
+               height: 100%;
+               background: rgba(0,0,0,0.5);
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               z-index: 2000;
+               padding: 20px;
+           `;
+           
+           const modalContent = document.createElement('div');
+           modalContent.style.cssText = `
+               background: white;
+               border-radius: 15px;
+               padding: 25px;
+               max-width: 90%;
+               max-height: 80%;
+               overflow-y: auto;
+               box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+           `;
+           
+           modalContent.innerHTML = `
+               <h3 style="color: #667eea; margin-bottom: 15px;">${title}</h3>
+               <div style="white-space: pre-wrap; line-height: 1.5; margin-bottom: 20px; font-size: 14px;">${content}</div>
+               <button onclick="this.closest('.modal').remove()" class="btn btn-primary" style="width: 100%;">Cerrar</button>
+           `;
+           
+           modal.className = 'modal';
+           modal.appendChild(modalContent);
+           document.body.appendChild(modal);
+           
+           modal.addEventListener('click', (e) => {
+               if (e.target === modal) {
+                   modal.remove();
+               }
+           });
+       }
+
+       function searchLinkedIn() {
+           const name = document.getElementById('leadName').value;
+           const company = document.getElementById('leadCompany').value;
+           
+           if (name && name.trim()) {
+               try {
+                   let searchQuery = name.trim();
+                   
+                   if (company && company.trim()) {
+                       searchQuery += ` ${company.trim()}`;
+                   }
+                   
+                   const linkedInURL = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(searchQuery)}`;
+                   
+                   const modal = document.createElement('div');
+                   modal.style.cssText = `
+                       position: fixed;
+                       top: 0;
+                       left: 0;
+                       width: 100%;
+                       height: 100%;
+                       background: rgba(0,0,0,0.5);
+                       display: flex;
+                       align-items: center;
+                       justify-content: center;
+                       z-index: 2000;
+                       padding: 20px;
+                   `;
+                   
+                   const modalContent = document.createElement('div');
+                   modalContent.style.cssText = `
+                       background: white;
+                       border-radius: 15px;
+                       padding: 25px;
+                       max-width: 90%;
+                       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                   `;
+                   
+                   modalContent.innerHTML = `
+                       <h3 style="color: #667eea; margin-bottom: 15px;">🔍 Búsqueda en LinkedIn</h3>
+                       <p style="margin-bottom: 20px;">Se abrirá LinkedIn con la búsqueda: "<strong>${searchQuery}</strong>"</p>
+                       <div style="background: #f0f8ff; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                           <p style="font-size: 0.9rem; color: #0066cc; margin-bottom: 10px;">
+                               📝 <strong>Pasos a seguir:</strong>
+                           </p>
+                           <ol style="font-size: 0.85rem; color: #666; margin: 0; padding-left: 20px;">
+                               <li>Se abrirá LinkedIn en una nueva ventana</li>
+                               <li>Busca el perfil correcto en los resultados</li>
+                               <li>Haz clic en el perfil para abrirlo</li>
+                               <li>Copia la URL completa del perfil (Ctrl+L, Ctrl+C)</li>
+                               <li>Regresa a esta app</li>
+                               <li>Usa el botón "📋 Pegar desde portapapeles"</li>
+                           </ol>
+                       </div>
+                       <div style="display: flex; gap: 10px;">
+                           <button onclick="openLinkedInSearch('${linkedInURL}'); this.closest('.modal').remove();" class="btn btn-primary" style="flex: 1;">🔗 Abrir LinkedIn</button>
+                           <button onclick="this.closest('.modal').remove()" class="btn btn-secondary" style="flex: 1;">❌ Cancelar</button>
+                       </div>
+                   `;
+                   
+                   modal.className = 'modal';
+                   modal.appendChild(modalContent);
+                   document.body.appendChild(modal);
+                   
+                   modal.addEventListener('click', (e) => {
+                       if (e.target === modal) {
+                           modal.remove();
+                       }
+                   });
+                   
+                   vibrate([100]);
+               } catch (error) {
+                   console.error('Error opening LinkedIn:', error);
+                   showNotification('Error abriendo LinkedIn', 'error');
+               }
+           } else {
+               showNotification('Primero ingresa el nombre para buscar', 'error');
+           }
+       }
+
+       function openLinkedInSearch(url) {
+           window.open(url, '_blank', 'noopener,noreferrer');
+           showNotification('LinkedIn abierto. Copia la URL del perfil y regresa a pegar aquí.');
+           
+           setTimeout(() => {
+               showNotification('💡 Tip: Usa Ctrl+C para copiar la URL en LinkedIn', 'info');
+           }, 3000);
+       }
+
+       async function pasteFromClipboard() {
+           try {
+               if (!navigator.clipboard) {
+                   showNotification('Portapapeles no disponible en este navegador', 'error');
+                   return;
+               }
+
+               const text = await navigator.clipboard.readText();
+               
+               if (text && (text.includes('linkedin.com/in/') || text.includes('linkedin.com/pub/'))) {
+                   document.getElementById('leadLinkedIn').value = text.trim();
+                   showNotification('✓ URL de LinkedIn pegada exitosamente!');
+                   vibrate([100, 50, 100]);
+               } else if (text && text.includes('linkedin.com')) {
+                   document.getElementById('leadLinkedIn').value = text.trim();
+                   showNotification('✓ URL de LinkedIn detectada y pegada');
+                   vibrate([100]);
+               } else if (text) {
+                   showNotification('⚠️ El texto copiado no parece ser una URL de LinkedIn', 'error');
+               } else {
+                   showNotification('No hay texto en el portapapeles', 'error');
+               }
+           } catch (error) {
+               console.error('Error accessing clipboard:', error);
+               showNotification('Error accediendo al portapapeles. Intenta pegar manualmente (Ctrl+V)', 'error');
+           }
+       }
+
+       function showMessagePreview() {
+           const contactLink = document.getElementById('leadContactLink').value;
+           
+           if (!contactLink) {
+               showNotification('No hay link de contacto configurado', 'error');
+               return;
+           }
+           
+           const leadName = document.getElementById('leadName').value || 'amigo/a';
+           const leadCompany = document.getElementById('leadCompany').value || '';
+           const description = document.getElementById('leadDescription').value || 'tu proyecto';
+           
+           const senderName = document.getElementById('senderName').value || '[Configura tu nombre]';
+           const senderCompany = document.getElementById('senderCompany').value || '[Configura tu empresa]';
+           const senderPhone = document.getElementById('senderPhone').value || '[Configura tu teléfono]';
+           const senderEmail = document.getElementById('senderEmail').value || '[Configura tu email]';
+           
+           const template = document.getElementById('whatsappTemplate').value || defaultTemplates.default;
+           
+           const personalizedMessage = template
+               .replace(/{nombre}/g, leadName)
+               .replace(/{empresa}/g, leadCompany)
+               .replace(/{miNombre}/g, senderName)
+               .replace(/{miEmpresa}/g, senderCompany)
+               .replace(/{miTelefono}/g, senderPhone)
+               .replace(/{miEmail}/g, senderEmail)
+               .replace(/{oportunidad}/g, description);
+
+           const modal = document.createElement('div');
+           modal.style.cssText = `
+               position: fixed;
+               top: 0;
+               left: 0;
+               width: 100%;
+               height: 100%;
+               background: rgba(0,0,0,0.5);
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               z-index: 2000;
+               padding: 20px;
+           `;
+           
+           const modalContent = document.createElement('div');
+           modalContent.style.cssText = `
+               background: white;
+               border-radius: 15px;
+               padding: 25px;
+               max-width: 90%;
+               max-height: 80%;
+               overflow-y: auto;
+               box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+           `;
+           
+           modalContent.innerHTML = `
+               <h3 style="color: #667eea; margin-bottom: 15px;">💬 Mensaje a Enviar</h3>
+               <div style="background: #f0f0f0; padding: 15px; border-radius: 10px; white-space: pre-wrap; line-height: 1.5; margin-bottom: 20px; font-size: 14px; max-height: 200px; overflow-y: auto;">${personalizedMessage}</div>
+               <p style="font-size: 0.8rem; color: #666; margin-bottom: 15px;">
+                   📱 <strong>Link:</strong> ${contactLink}
+               </p>
+               <div style="display: flex; gap: 10px;">
+                   <button onclick="sendWhatsAppMessageFromPreview('${contactLink}'); this.closest('.modal').remove();" class="btn btn-success" style="flex: 1;">✅ Enviar</button>
+                   <button onclick="this.closest('.modal').remove()" class="btn btn-secondary" style="flex: 1;">❌ Cancelar</button>
+               </div>
+           `;
+           
+           modal.className = 'modal';
+           modal.appendChild(modalContent);
+           document.body.appendChild(modal);
+           
+           modal.addEventListener('click', (e) => {
+               if (e.target === modal) {
+                   modal.remove();
+               }
+           });
+           
+           vibrate([50]);
+       }
+
+       function sendWhatsAppMessageFromPreview(contactLink) {
+           sendWhatsAppMessage(null, contactLink);
+       }
+
+       function sendWhatsAppMessage(message = null, contactLink = null) {
+           try {
+               const link = contactLink || document.getElementById('leadContactLink').value;
+               console.log('Sending WhatsApp message with link:', link);
+               
+               if (!link) {
+                   showNotification('No hay link de WhatsApp para enviar mensaje', 'error');
+                   return;
+               }
+               
+               let finalMessage = message;
+               
+               if (!finalMessage) {
+                   const leadName = document.getElementById('leadName').value || 'amigo/a';
+                   const leadCompany = document.getElementById('leadCompany').value || '';
+                   const description = document.getElementById('leadDescription').value || 'tu proyecto';
+                   
+                   const senderName = document.getElementById('senderName').value || 'Usuario';
+                   const senderCompany = document.getElementById('senderCompany').value || 'Mi Empresa';
+                   const senderPhone = document.getElementById('senderPhone').value || 'No configurado';
+                   const senderEmail = document.getElementById('senderEmail').value || 'No configurado';
+                   
+                   const template = document.getElementById('whatsappTemplate').value || defaultTemplates.default;
+                   
+                   finalMessage = template
+                       .replace(/{nombre}/g, leadName)
+                       .replace(/{empresa}/g, leadCompany)
+                       .replace(/{miNombre}/g, senderName)
+                       .replace(/{miEmpresa}/g, senderCompany)
+                       .replace(/{miTelefono}/g, senderPhone)
+                       .replace(/{miEmail}/g, senderEmail)
+                       .replace(/{oportunidad}/g, description);
+               }
+
+               let phone = null;
+               
+               const patterns = [
+                   /wa\.me\/(\+?\d{8,15})/,
+                   /whatsapp:\/\/send\?phone=(\+?\d{8,15})/,
+                   /api\.whatsapp\.com\/send\?phone=(\+?\d{8,15})/,
+                   /phone=(\+?\d{8,15})/,
+                   /(\+?\d{10,15})/
+               ];
+               
+               for (const pattern of patterns) {
+                   const match = link.match(pattern);
+                   if (match) {
+                       phone = match[1];
+                       break;
+                   }
+               }
+               
+               if (!phone) {
+                   console.error('No phone number found in link:', link);
+                   showNotification('No se pudo extraer el número de teléfono del link', 'error');
+                   try {
+                       window.open(link, '_blank', 'noopener,noreferrer');
+                       showNotification('Abriendo link original de WhatsApp...');
+                   } catch (openError) {
+                       showNotification('Error abriendo el link de WhatsApp', 'error');
+                   }
+                   return;
+               }
+               
+               phone = phone.replace(/[^\d+]/g, '');
+               if (!phone.startsWith('+')) {
+                   if (phone.length === 10) {
+                       phone = '+1' + phone;
+                   } else {
+                       phone = '+' + phone;
+                   }
+               }
+               
+               console.log('Cleaned phone number:', phone);
+               
+               const encodedMessage = encodeURIComponent(finalMessage);
+               const whatsappURL = `https://wa.me/${phone.replace('+', '')}?text=${encodedMessage}`;
+               
+               console.log('Final WhatsApp URL:', whatsappURL);
+               
+               window.open(whatsappURL, '_blank', 'noopener,noreferrer');
+               showNotification('✓ Abriendo WhatsApp con tu mensaje...');
+               vibrate([100, 50, 100]);
+               
+           } catch (error) {
+               console.error('Error sending WhatsApp message:', error);
+               showNotification('Error enviando mensaje de WhatsApp: ' + error.message, 'error');
+               
+               const originalLink = contactLink || document.getElementById('leadContactLink').value;
+               if (originalLink) {
+                   try {
+                       window.open(originalLink, '_blank', '
+                                   window.open(originalLink, '_blank', 'noopener,noreferrer');
+                       showNotification('Abriendo link original como respaldo...');
+                   } catch (fallbackError) {
+                       console.error('Fallback also failed:', fallbackError);
+                   }
+               }
+           }
+       }
+
+       async function startRecording() {
+           try {
+               const stream = await navigator.mediaDevices.getUserMedia({ 
+                   audio: {
+                       echoCancellation: true,
+                       noiseSuppression: true,
+                       autoGainControl: true
+                   } 
+               });
+               
+               mediaRecorder = new MediaRecorder(stream, {
+                   mimeType: 'audio/webm;codecs=opus'
+               });
+               recordedChunks = [];
+
+               mediaRecorder.addEventListener('dataavailable', event => {
+                   if (event.data.size > 0) {
+                       recordedChunks.push(event.data);
+                   }
+               });
+
+               mediaRecorder.addEventListener('stop', () => {
+                   currentAudioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                   document.getElementById('playBtn').classList.remove('hidden');
+                   document.getElementById('recordingStatus').innerHTML = '<span class="success">✓ Grabación guardada</span>';
+                   vibrate([200]);
+               });
+
+               mediaRecorder.start(1000);
+               document.getElementById('recordBtn').classList.add('hidden');
+               document.getElementById('stopBtn').classList.remove('hidden');
+               document.getElementById('recordingStatus').innerHTML = '<span style="color: red;">🔴 Grabando...</span>';
+               
+               showNotification('Grabación iniciada');
+               vibrate([100]);
+
+           } catch (error) {
+               console.error('Error accessing microphone:', error);
+               showNotification('Error accediendo al micrófono: ' + error.message, 'error');
+           }
+       }
+
+       function stopRecording() {
+           if (mediaRecorder && mediaRecorder.state === 'recording') {
+               mediaRecorder.stop();
+               mediaRecorder.stream.getTracks().forEach(track => track.stop());
+           }
+           document.getElementById('recordBtn').classList.remove('hidden');
+           document.getElementById('stopBtn').classList.add('hidden');
+           
+           showNotification('Grabación detenida');
+           vibrate([50, 50, 50]);
+       }
+
+       function playRecording() {
+           if (currentAudioBlob) {
+               try {
+                   const audio = new Audio(URL.createObjectURL(currentAudioBlob));
+                   audio.play();
+                   showNotification('Reproduciendo grabación...');
+                   vibrate([50]);
+               } catch (error) {
+                   console.error('Error playing recording:', error);
+                   showNotification('Error reproduciendo grabación', 'error');
+               }
+           }
+       }
+
+       document.getElementById('leadForm').addEventListener('submit', function(e) {
+           e.preventDefault();
+           
+           try {
+               const lead = {
+                   id: Date.now(),
+                   name: document.getElementById('leadName').value,
+                   company: document.getElementById('leadCompany').value,
+                   email: document.getElementById('leadEmail').value,
+                   phone: document.getElementById('leadPhone').value,
+                   linkedin: document.getElementById('leadLinkedIn').value,
+                   contactLink: document.getElementById('leadContactLink').value,
+                   description: document.getElementById('leadDescription').value,
+                   audioBlob: currentAudioBlob ? URL.createObjectURL(currentAudioBlob) : null,
+                   timestamp: new Date().toLocaleString()
+               };
+               
+               leads.push(lead);
+               saveData();
+               updateLeadCount();
+               
+               document.getElementById('leadForm').reset();
+               document.getElementById('leadContactLink').value = '';
+               document.getElementById('openContactLink').classList.add('hidden');
+               document.getElementById('sendWhatsAppMessage').classList.add('hidden');
+               currentAudioBlob = null;
+               document.getElementById('playBtn').classList.add('hidden');
+               document.getElementById('recordingStatus').innerHTML = '';
+               
+               showNotification('✓ Lead guardado exitosamente!');
+               vibrate([200, 100, 200]);
+               
+               setTimeout(() => {
+                   showTab('list');
+               }, 1500);
+               
+           } catch (error) {
+               console.error('Error saving lead:', error);
+               showNotification('Error guardando el lead', 'error');
+           }
+       });
+
+       function updateLeadCount() {
+           document.getElementById('leadCount').textContent = leads.length;
+       }
+
+       function displayLeads() {
+           const leadsList = document.getElementById('leadsList');
+           if (leads.length === 0) {
+               leadsList.innerHTML = `
+                   <div style="text-align: center; color: #666; padding: 40px 20px;">
+                       <div style="font-size: 3rem; margin-bottom: 15px;">📋</div>
+                       <p>No hay leads guardados</p>
+                       <p style="font-size: 0.9rem; margin-top: 10px;">Usa la pestaña "Capturar" para agregar tu primer lead</p>
+                   </div>
+               `;
+               return;
+           }
+           
+           const sortedLeads = [...leads].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+           
+           leadsList.innerHTML = sortedLeads.map((lead, index) => `
+               <div class="lead-item" data-lead-id="${lead.id}">
+                   <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                       <h4>${lead.name || 'Sin nombre'}</h4>
+                       <button onclick="deleteLead(${lead.id})" style="background: #dc3545; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; font-size: 12px;">✕</button>
+                   </div>
+                   
+                   ${lead.company ? `<p><strong>🏢 Empresa:</strong> ${lead.company}</p>` : ''}
+                   ${lead.email ? `<p><strong>📧 Email:</strong> <a href="mailto:${lead.email}" style="color: #667eea;">${lead.email}</a></p>` : ''}
+                   ${lead.phone ? `<p><strong>📞 Teléfono:</strong> <a href="tel:${lead.phone}" style="color: #667eea;">${lead.phone}</a></p>` : ''}
+                   ${lead.linkedin ? `<p><strong>💼 LinkedIn:</strong> <a href="${lead.linkedin}" target="_blank" style="color: #667eea;">Ver perfil</a></p>` : ''}
+                   ${lead.contactLink ? `<p><strong>🔗 Contacto:</strong> <a href="${lead.contactLink}" target="_blank" style="color: #667eea;">Abrir enlace</a></p>` : ''}
+                   ${lead.description ? `<p><strong>📝 Descripción:</strong> ${lead.description}</p>` : ''}
+                   
+                   <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
+                       <small style="color: #999;">📅 ${lead.timestamp}</small>
+                       ${lead.contactLink && lead.contactLink.includes('wa.me') ? `
+                           <button onclick="quickWhatsApp('${lead.contactLink}', '${lead.name}')" class="btn btn-success" style="padding: 5px 12px; font-size: 12px;">
+                               💬 WhatsApp
+                           </button>
+                       ` : ''}
+                   </div>
+                   
+                   ${lead.audioBlob ? `
+                       <div style="margin-top: 10px;">
+                           <audio controls style="width: 100%; height: 35px;">
+                               <source src="${lead.audioBlob}" type="audio/webm">
+                               Tu navegador no soporta audio.
+                           </audio>
+                       </div>
+                   ` : ''}
+               </div>
+           `).join('');
+       }
+
+       function deleteLead(leadId) {
+           const lead = leads.find(l => l.id === leadId);
+           if (!lead) return;
+           
+           const confirmed = confirm(`¿Estás seguro de eliminar el lead "${lead.name}"?`);
+           if (confirmed) {
+               leads = leads.filter(l => l.id !== leadId);
+               saveData();
+               updateLeadCount();
+               displayLeads();
+               showNotification('Lead eliminado');
+               vibrate([100, 50, 100]);
+           }
+       }
+
+       function quickWhatsApp(contactLink, leadName) {
+           try {
+               console.log('Quick WhatsApp for:', leadName, 'with link:', contactLink);
+               
+               if (!contactLink) {
+                   showNotification('No hay link de WhatsApp disponible', 'error');
+                   return;
+               }
+               
+               const quickMessage = `Hola ${leadName || 'amigo/a'}! Espero estés bien. Te escribo en seguimiento a nuestra conversación en el evento.`;
+               
+               let phone = null;
+               const patterns = [
+                   /wa\.me\/(\+?\d{8,15})/,
+                   /whatsapp:\/\/send\?phone=(\+?\d{8,15})/,
+                   /api\.whatsapp\.com\/send\?phone=(\+?\d{8,15})/,
+                   /phone=(\+?\d{8,15})/,
+                   /(\+?\d{10,15})/
+               ];
+               
+               for (const pattern of patterns) {
+                   const match = contactLink.match(pattern);
+                   if (match) {
+                       phone = match[1];
+                       break;
+                   }
+               }
+               
+               if (phone) {
+                   phone = phone.replace(/[^\d+]/g, '');
+                   if (!phone.startsWith('+')) {
+                       phone = '+' + phone;
+                   }
+                   
+                   const encodedMessage = encodeURIComponent(quickMessage);
+                   const whatsappURL = `https://wa.me/${phone.replace('+', '')}?text=${encodedMessage}`;
+                   
+                   console.log('Opening WhatsApp URL:', whatsappURL);
+                   window.open(whatsappURL, '_blank', 'noopener,noreferrer');
+                   showNotification('Abriendo WhatsApp...');
+                   vibrate([100]);
+               } else {
+                   console.log('No phone found, opening original link');
+                   window.open(contactLink, '_blank', 'noopener,noreferrer');
+                   showNotification('Abriendo link de contacto...');
+               }
+           } catch (error) {
+               console.error('Error in quickWhatsApp:', error);
+               showNotification('Error abriendo WhatsApp: ' + error.message, 'error');
+               
+               try {
+                   window.open(contactLink, '_blank', 'noopener,noreferrer');
+               } catch (finalError) {
+                   console.error('All attempts failed:', finalError);
+               }
+           }
+       }
+
+       function exportToCSV() {
+           if (leads.length === 0) {
+               showNotification('No hay leads para exportar', 'error');
+               return;
+           }
+           
+           try {
+               const headers = ['Nombre', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Link Contacto', 'Descripción', 'Fecha'];
+               const csvContent = [
+                   headers.join(','),
+                   ...leads.map(lead => [
+                       `"${(lead.name || '').replace(/"/g, '""')}"`,
+                       `"${(lead.company || '').replace(/"/g, '""')}"`,
+                       `"${(lead.email || '').replace(/"/g, '""')}"`,
+                       `"${(lead.phone || '').replace(/"/g, '""')}"`,
+                       `"${(lead.linkedin || '').replace(/"/g, '""')}"`,
+                       `"${(lead.contactLink || '').replace(/"/g, '""')}"`,
+                       `"${(lead.description || '').replace(/"/g, '""')}"`,
+                       `"${(lead.timestamp || '').replace(/"/g, '""')}"`
+                   ].join(','))
+               ].join('\n');
+               
+               const BOM = '\uFEFF';
+               const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+               
+               const link = document.createElement('a');
+               link.href = URL.createObjectURL(blob);
+               link.download = `leads_${currentUser}_${new Date().toISOString().split('T')[0]}.csv`;
+               
+               document.body.appendChild(link);
+               link.click();
+               document.body.removeChild(link);
+               
+               showNotification(`✓ ${leads.length} leads exportados exitosamente`);
+               vibrate([200, 100, 200]);
+               
+           } catch (error) {
+               console.error('Error exporting CSV:', error);
+               showNotification('Error exportando datos', 'error');
+           }
+       }
+
+       function logout() {
+           const confirmed = confirm('¿Estás seguro de cerrar sesión?');
+           if (confirmed) {
+               stopQRScan();
+               if (mediaRecorder && mediaRecorder.state === 'recording') {
+                   stopRecording();
+               }
+               
+               currentUser = null;
+               leads = [];
+               document.getElementById('mainApp').classList.add('hidden');
+               document.getElementById('loginScreen').classList.remove('hidden');
+               document.getElementById('loginForm').reset();
+               
+               showNotification('Sesión cerrada');
+               vibrate([100]);
+           }
+       }
+
+       window.addEventListener('load', function() {
+           showLogin();
+           
+           if ('serviceWorker' in navigator) {
+               navigator.serviceWorker.register('sw.js')
+               .then(function(registration) {
+                   console.log('Service Worker registered successfully');
+               })
+               .catch(function(error) {
+                   console.log('Service Worker registration failed:', error);
+               });
+           }
+           
+           addToHomeScreen();
+           
+           let lastTouchEnd = 0;
+           document.addEventListener('touchend', function (event) {
+               const now = (new Date()).getTime();
+               if (now - lastTouchEnd <= 300) {
+                   event.preventDefault();
+               }
+               lastTouchEnd = now;
+           }, false);
+           
+           window.addEventListener('orientationchange', function() {
+               setTimeout(() => {
+                   window.scrollTo(0, 1);
+               }, 500);
+           });
+           
+           document.addEventListener('visibilitychange', function() {
+               if (document.hidden) {
+                   if (scanningQR) {
+                       stopQRScan();
+                   }
+               } else {
+                   console.log('App resumed');
+               }
+           });
+       });
+
+       window.addEventListener('beforeunload', function (e) {
+           if (scanningQR) {
+               stopQRScan();
+           }
+           if (mediaRecorder && mediaRecorder.state === 'recording') {
+               stopRecording();
+           }
+       });
+
+       document.addEventListener('keydown', function(e) {
+           if (e.ctrlKey || e.metaKey) {
+               switch(e.key) {
+                   case 's':
+                       e.preventDefault();
+                       if (document.getElementById('captureTab').style.display !== 'none') {
+                           document.getElementById('leadForm').dispatchEvent(new Event('submit'));
+                       }
+                       break;
+                   case '1':
+                       e.preventDefault();
+                       showTab('capture');
+                       break;
+                   case '2':
+                       e.preventDefault();
+                       showTab('list');
+                       break;
+                   case '3':
+                       e.preventDefault();
+                       showTab('config');
+                       break;
+                   case '4':
+                       e.preventDefault();
+                       showTab('export');
+                       break;
+               }
+           }
+       });
+
+       const configInputs = ['senderName', 'senderCompany', 'senderPhone', 'senderEmail'];
+       configInputs.forEach(inputId => {
+           document.getElementById(inputId).addEventListener('input', function() {
+               clearTimeout(this.saveTimeout);
+               this.saveTimeout = setTimeout(() => {
+                   if (currentUser) {
+                       saveCurrentTemplate();
+                   }
+               }, 2000);
+           });
+       });
+
+       window.addEventListener('error', function(e) {
+           console.error('Application error:', e.error);
+           showNotification('Ha ocurrido un error. Intenta recargar la app.', 'error');
+       });
+
+       window.addEventListener('online', function() {
+           showNotification('Conexión restaurada');
+       });
+
+       window.addEventListener('offline', function() {
+           showNotification('Sin conexión a internet', 'error');
+       });
+
+       console.log('🚀 Lead Collector PWA inicializada correctamente');
+   </script>
+</body>
+</html>
