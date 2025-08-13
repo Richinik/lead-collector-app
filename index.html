@@ -1475,4 +1475,320 @@ Usa las variables:
                     name: document.getElementById('leadName').value,
                     company: document.getElementById('leadCompany').value,
                     email: document.getElementById('leadEmail').value,
-                    phone: document.getElementById('lea
+                    phone: document.getElementById('leadPhone').value,
+                    linkedin: document.getElementById('leadLinkedIn').value,
+                    contactLink: document.getElementById('leadContactLink').value,
+                    description: document.getElementById('leadDescription').value,
+                    audioBlob: currentAudioBlob ? URL.createObjectURL(currentAudioBlob) : null,
+                    timestamp: new Date().toLocaleString()
+                };
+                
+                leads.push(lead);
+                saveData();
+                updateLeadCount();
+                
+                // Clear form with enhanced feedback
+                document.getElementById('leadForm').reset();
+                document.getElementById('leadContactLink').value = '';
+                document.getElementById('openContactLink').classList.add('hidden');
+                document.getElementById('sendWhatsAppMessage').classList.add('hidden');
+                currentAudioBlob = null;
+                document.getElementById('playBtn').classList.add('hidden');
+                document.getElementById('recordingStatus').innerHTML = '';
+                
+                showNotification('✓ Lead guardado exitosamente!');
+                vibrate([200, 100, 200]);
+                
+                // Auto-switch to list tab to show the saved lead
+                setTimeout(() => {
+                    showTab('list');
+                }, 1500);
+                
+            } catch (error) {
+                console.error('Error saving lead:', error);
+                showNotification('Error guardando el lead', 'error');
+            }
+        });
+
+        function updateLeadCount() {
+            document.getElementById('leadCount').textContent = leads.length;
+        }
+
+        function displayLeads() {
+            const leadsList = document.getElementById('leadsList');
+            if (leads.length === 0) {
+                leadsList.innerHTML = `
+                    <div style="text-align: center; color: #666; padding: 40px 20px;">
+                        <div style="font-size: 3rem; margin-bottom: 15px;">📋</div>
+                        <p>No hay leads guardados</p>
+                        <p style="font-size: 0.9rem; margin-top: 10px;">Usa la pestaña "Capturar" para agregar tu primer lead</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Sort leads by timestamp (newest first)
+            const sortedLeads = [...leads].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            
+            leadsList.innerHTML = sortedLeads.map((lead, index) => `
+                <div class="lead-item" data-lead-id="${lead.id}">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                        <h4>${lead.name || 'Sin nombre'}</h4>
+                        <button onclick="deleteLead(${lead.id})" style="background: #dc3545; color: white; border: none; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; font-size: 12px;">✕</button>
+                    </div>
+                    
+                    ${lead.company ? `<p><strong>🏢 Empresa:</strong> ${lead.company}</p>` : ''}
+                    ${lead.email ? `<p><strong>📧 Email:</strong> <a href="mailto:${lead.email}" style="color: #667eea;">${lead.email}</a></p>` : ''}
+                    ${lead.phone ? `<p><strong>📞 Teléfono:</strong> <a href="tel:${lead.phone}" style="color: #667eea;">${lead.phone}</a></p>` : ''}
+                    ${lead.linkedin ? `<p><strong>💼 LinkedIn:</strong> <a href="${lead.linkedin}" target="_blank" style="color: #667eea;">Ver perfil</a></p>` : ''}
+                    ${lead.contactLink ? `<p><strong>🔗 Contacto:</strong> <a href="${lead.contactLink}" target="_blank" style="color: #667eea;">Abrir enlace</a></p>` : ''}
+                    ${lead.description ? `<p><strong>📝 Descripción:</strong> ${lead.description}</p>` : ''}
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
+                        <small style="color: #999;">📅 ${lead.timestamp}</small>
+                        ${lead.contactLink && lead.contactLink.includes('wa.me') ? `
+                            <button onclick="quickWhatsApp('${lead.contactLink}', '${lead.name}')" class="btn btn-success" style="padding: 5px 12px; font-size: 12px;">
+                                💬 WhatsApp
+                            </button>
+                        ` : ''}
+                    </div>
+                    
+                    ${lead.audioBlob ? `
+                        <div style="margin-top: 10px;">
+                            <audio controls style="width: 100%; height: 35px;">
+                                <source src="${lead.audioBlob}" type="audio/webm">
+                                Tu navegador no soporta audio.
+                            </audio>
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Enhanced lead deletion with confirmation
+        function deleteLead(leadId) {
+            const lead = leads.find(l => l.id === leadId);
+            if (!lead) return;
+            
+            const confirmed = confirm(`¿Estás seguro de eliminar el lead "${lead.name}"?`);
+            if (confirmed) {
+                leads = leads.filter(l => l.id !== leadId);
+                saveData();
+                updateLeadCount();
+                displayLeads();
+                showNotification('Lead eliminado');
+                vibrate([100, 50, 100]);
+            }
+        }
+
+        // Quick WhatsApp function for saved leads
+        function quickWhatsApp(contactLink, leadName) {
+            try {
+                // Use a simple greeting message for quick contact
+                const quickMessage = `Hola ${leadName}! Espero estés bien. Te escribo en seguimiento a nuestra conversación en el evento.`;
+                
+                const phoneMatch = contactLink.match(/(?:phone=|wa\.me\/)(\+?\d{8,15})/);
+                if (phoneMatch) {
+                    const phone = phoneMatch[1];
+                    const encodedMessage = encodeURIComponent(quickMessage);
+                    const whatsappURL = `https://wa.me/${phone}?text=${encodedMessage}`;
+                    
+                    window.open(whatsappURL, '_blank', 'noopener,noreferrer');
+                    showNotification('Abriendo WhatsApp...');
+                    vibrate([100]);
+                } else {
+                    window.open(contactLink, '_blank', 'noopener,noreferrer');
+                }
+            } catch (error) {
+                console.error('Error opening WhatsApp:', error);
+                showNotification('Error abriendo WhatsApp', 'error');
+            }
+        }
+
+        // Enhanced CSV export with better formatting
+        function exportToCSV() {
+            if (leads.length === 0) {
+                showNotification('No hay leads para exportar', 'error');
+                return;
+            }
+            
+            try {
+                const headers = ['Nombre', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Link Contacto', 'Descripción', 'Fecha'];
+                const csvContent = [
+                    headers.join(','),
+                    ...leads.map(lead => [
+                        `"${(lead.name || '').replace(/"/g, '""')}"`,
+                        `"${(lead.company || '').replace(/"/g, '""')}"`,
+                        `"${(lead.email || '').replace(/"/g, '""')}"`,
+                        `"${(lead.phone || '').replace(/"/g, '""')}"`,
+                        `"${(lead.linkedin || '').replace(/"/g, '""')}"`,
+                        `"${(lead.contactLink || '').replace(/"/g, '""')}"`,
+                        `"${(lead.description || '').replace(/"/g, '""')}"`,
+                        `"${(lead.timestamp || '').replace(/"/g, '""')}"`
+                    ].join(','))
+                ].join('\n');
+                
+                // Add BOM for proper UTF-8 encoding
+                const BOM = '\uFEFF';
+                const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `leads_${currentUser}_${new Date().toISOString().split('T')[0]}.csv`;
+                
+                // Trigger download
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showNotification(`✓ ${leads.length} leads exportados exitosamente`);
+                vibrate([200, 100, 200]);
+                
+            } catch (error) {
+                console.error('Error exporting CSV:', error);
+                showNotification('Error exportando datos', 'error');
+            }
+        }
+
+        // Enhanced logout with confirmation
+        function logout() {
+            const confirmed = confirm('¿Estás seguro de cerrar sesión?');
+            if (confirmed) {
+                // Stop any ongoing camera/recording
+                stopQRScan();
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    stopRecording();
+                }
+                
+                currentUser = null;
+                leads = [];
+                document.getElementById('mainApp').classList.add('hidden');
+                document.getElementById('loginScreen').classList.remove('hidden');
+                document.getElementById('loginForm').reset();
+                
+                showNotification('Sesión cerrada');
+                vibrate([100]);
+            }
+        }
+
+        // Enhanced app initialization with PWA features
+        window.addEventListener('load', function() {
+            showLogin();
+            
+            // Register service worker for offline functionality
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('data:text/javascript;base64,c2VsZi5hZGRFdmVudExpc3RlbmVyKCdpbnN0YWxsJywgZnVuY3Rpb24oZXZlbnQpIHsKICBzZWxmLnNraXBXYWl0aW5nKCk7Cn0pOwoKc2VsZi5hZGRFdmVudExpc3RlbmVyKCdhY3RpdmF0ZScsIGZ1bmN0aW9uKGV2ZW50KSB7CiAgcmV0dXJuIHNlbGYuY2xpZW50cy5jbGFpbSgpOwp9KTs=')
+                .then(function(registration) {
+                    console.log('Service Worker registered successfully');
+                })
+                .catch(function(error) {
+                    console.log('Service Worker registration failed:', error);
+                });
+            }
+            
+            // Initialize PWA install prompt
+            addToHomeScreen();
+            
+            // Prevent zoom on double tap
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', function (event) {
+                const now = (new Date()).getTime();
+                if (now - lastTouchEnd <= 300) {
+                    event.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, false);
+            
+            // Handle orientation change
+            window.addEventListener('orientationchange', function() {
+                setTimeout(() => {
+                    window.scrollTo(0, 1);
+                }, 500);
+            });
+            
+            // Handle app state changes
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    // App went to background
+                    if (scanningQR) {
+                        stopQRScan();
+                    }
+                } else {
+                    // App came to foreground
+                    console.log('App resumed');
+                }
+            });
+        });
+
+        // Handle back button on Android
+        window.addEventListener('beforeunload', function (e) {
+            if (scanningQR) {
+                stopQRScan();
+            }
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                stopRecording();
+            }
+        });
+
+        // Keyboard shortcuts for desktop users
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 's':
+                        e.preventDefault();
+                        if (document.getElementById('captureTab').style.display !== 'none') {
+                            document.getElementById('leadForm').dispatchEvent(new Event('submit'));
+                        }
+                        break;
+                    case '1':
+                        e.preventDefault();
+                        showTab('capture');
+                        break;
+                    case '2':
+                        e.preventDefault();
+                        showTab('list');
+                        break;
+                    case '3':
+                        e.preventDefault();
+                        showTab('config');
+                        break;
+                    case '4':
+                        e.preventDefault();
+                        showTab('export');
+                        break;
+                }
+            }
+        });
+
+        // Auto-save configuration on input
+        const configInputs = ['senderName', 'senderCompany', 'senderPhone', 'senderEmail'];
+        configInputs.forEach(inputId => {
+            document.getElementById(inputId).addEventListener('input', function() {
+                clearTimeout(this.saveTimeout);
+                this.saveTimeout = setTimeout(() => {
+                    if (currentUser) {
+                        saveCurrentTemplate();
+                    }
+                }, 2000);
+            });
+        });
+
+        // Enhanced error handling
+        window.addEventListener('error', function(e) {
+            console.error('Application error:', e.error);
+            showNotification('Ha ocurrido un error. Intenta recargar la app.', 'error');
+        });
+
+        // Handle network status
+        window.addEventListener('online', function() {
+            showNotification('Conexión restaurada');
+        });
+
+        window.addEventListener('offline', function() {
+            showNotification('Sin conexión a internet', 'error');
+        });
+
+        console.log('🚀 Lead Collector PWA inicializada correctamente');
+    </script>
+</body>
+</html>
