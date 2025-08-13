@@ -707,3 +707,772 @@
                     loadData();
                     showNotification('¡Bienvenido!');
                     addToHomeScreen();
+                } else {
+                    showNotification('Usuario o contraseña incorrectos', 'error');
+                }
+            } catch (error) {
+                console.error('Error during login:', error);
+                showNotification('Error al iniciar sesión', 'error');
+            }
+        });
+
+        document.getElementById('registerForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            try {
+                const users = JSON.parse(localStorage.getItem('users') || '{}');
+                
+                if (users[username]) {
+                    showNotification('El usuario ya existe', 'error');
+                    return;
+                }
+                
+                users[username] = { email, password };
+                localStorage.setItem('users', JSON.stringify(users));
+                
+                showNotification('Usuario registrado exitosamente');
+                showLogin();
+            } catch (error) {
+                console.error('Error during registration:', error);
+                showNotification('Error al registrar usuario', 'error');
+            }
+        });
+
+        // Tab navigation with enhanced mobile experience
+        function showTab(tab) {
+            // Remove active state from all tabs
+            document.querySelectorAll('.nav-tab').forEach(t => {
+                t.classList.remove('active');
+            });
+            document.querySelectorAll('[id$="Tab"]').forEach(t => {
+                t.classList.add('hidden');
+            });
+            
+            // Add active state to clicked tab
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Tab').classList.remove('hidden');
+            
+            // Vibration feedback
+            vibrate([30]);
+            
+            // Load content for specific tabs
+            if (tab === 'list') {
+                displayLeads();
+            } else if (tab === 'config') {
+                loadConfiguration();
+            }
+            
+            // Scroll to top smoothly
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Enhanced QR Code Scanner with better mobile support
+        let scanningQR = false;
+        
+        async function startQRScan() {
+            try {
+                const cameraContainer = document.getElementById('cameraContainer');
+                const video = document.getElementById('qr-video');
+                const scanBtn = document.getElementById('scanQRBtn');
+                
+                if (!scanningQR) {
+                    // Start scanning
+                    cameraContainer.classList.remove('hidden');
+                    scanBtn.innerHTML = '<span class="loading"></span> Escaneando...';
+                    scanBtn.onclick = stopQRScan;
+
+                    // Request camera with mobile-optimized constraints
+                    const constraints = {
+                        video: {
+                            facingMode: { ideal: 'environment' },
+                            width: { ideal: 1280, max: 1920 },
+                            height: { ideal: 720, max: 1080 },
+                            frameRate: { ideal: 30, max: 60 }
+                        }
+                    };
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = stream;
+                    
+                    // Handle video loading
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        scanningQR = true;
+                        scanBtn.textContent = '⏹️ Parar Escaneo';
+                        vibrate([100]);
+                        scanQRCode(video);
+                    };
+
+                } else {
+                    stopQRScan();
+                }
+            } catch (error) {
+                console.error('Camera error:', error);
+                showNotification('Error accediendo a la cámara: ' + error.message, 'error');
+                stopQRScan();
+            }
+        }
+
+        function scanQRCode(video) {
+            if (!scanningQR || !video.videoWidth) return;
+            
+            try {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                
+                if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                    canvas.height = video.videoHeight;
+                    canvas.width = video.videoWidth;
+                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                    
+                    if (typeof jsQR !== 'undefined') {
+                        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                            inversionAttempts: "dontInvert",
+                        });
+                        
+                        if (code && code.data) {
+                            processQRData(code.data);
+                            stopQRScan();
+                            return;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('QR scanning error:', error);
+            }
+            
+            // Continue scanning with optimized timing
+            if (scanningQR) {
+                requestAnimationFrame(() => scanQRCode(video));
+            }
+        }
+
+        function processQRData(data) {
+            try {
+                console.log('QR Data detected:', data);
+                
+                // Enhanced vCard detection
+                if (data.startsWith('BEGIN:VCARD')) {
+                    const vcard = parseVCard(data);
+                    fillFormFromQR(vcard);
+                    showNotification('✓ vCard escaneado exitosamente!');
+                }
+                // vCard URL detection
+                else if (data.includes('vcard') || data.includes('.vcf')) {
+                    fillFormFromQR({ contactLink: data, linkType: 'vCard' });
+                    showNotification('✓ Link vCard detectado!');
+                }
+                // Enhanced WhatsApp detection
+                else if (data.includes('wa.me') || data.includes('whatsapp.com') || data.includes('api.whatsapp.com')) {
+                    const whatsappData = extractWhatsAppData(data);
+                    whatsappData.contactLink = data;
+                    whatsappData.linkType = 'WhatsApp';
+                    fillFormFromQR(whatsappData);
+                    showNotification('✓ WhatsApp escaneado exitosamente!');
+                }
+                // LinkedIn detection
+                else if (data.includes('linkedin.com')) {
+                    fillFormFromQR({ linkedin: data });
+                    showNotification('✓ LinkedIn detectado!');
+                }
+                // Email detection
+                else if (data.includes('mailto:')) {
+                    const email = data.replace('mailto:', '').split('?')[0];
+                    fillFormFromQR({ email, contactLink: data, linkType: 'Email' });
+                    showNotification('✓ Email detectado!');
+                }
+                // Phone detection
+                else if (data.match(/^\+?[\d\s\-\(\)]+$/)) {
+                    fillFormFromQR({ phone: data });
+                    showNotification('✓ Teléfono detectado!');
+                }
+                // URL detection
+                else if (data.match(/^https?:\/\//)) {
+                    fillFormFromQR({ contactLink: data, description: 'URL escaneada: ' + data });
+                    showNotification('✓ URL detectada!');
+                }
+                // General text
+                else {
+                    fillFormFromQR({ description: 'QR escaneado: ' + data });
+                    showNotification('✓ QR escaneado - datos guardados');
+                }
+                
+                // Vibration feedback for successful scan
+                vibrate([200, 100, 200]);
+                
+            } catch (error) {
+                console.error('Error processing QR data:', error);
+                fillFormFromQR({ description: 'QR escaneado: ' + data });
+                showNotification('QR escaneado - datos guardados en descripción');
+            }
+        }
+
+        function parseVCard(vcard) {
+            const result = {};
+            const lines = vcard.split(/\r?\n/);
+            
+            lines.forEach(line => {
+                const trimmedLine = line.trim();
+                if (trimmedLine.startsWith('FN:')) {
+                    result.name = trimmedLine.substring(3);
+                } else if (trimmedLine.startsWith('ORG:')) {
+                    result.company = trimmedLine.substring(4);
+                } else if (trimmedLine.startsWith('EMAIL')) {
+                    const emailPart = trimmedLine.split(':');
+                    if (emailPart.length > 1) {
+                        result.email = emailPart[1];
+                    }
+                } else if (trimmedLine.startsWith('TEL')) {
+                    const telPart = trimmedLine.split(':');
+                    if (telPart.length > 1) {
+                        result.phone = telPart[1];
+                    }
+                } else if (trimmedLine.startsWith('URL') && trimmedLine.includes('linkedin')) {
+                    const urlPart = trimmedLine.split(':');
+                    if (urlPart.length > 1) {
+                        result.linkedin = urlPart.slice(1).join(':');
+                    }
+                }
+            });
+            
+            return result;
+        }
+
+        function extractWhatsAppData(url) {
+            const result = {};
+            
+            try {
+                console.log('Processing WhatsApp URL:', url);
+                
+                // Extract phone number from various WhatsApp formats
+                let phoneMatch = url.match(/(?:phone=|wa\.me\/)(\+?\d{8,15})/);
+                if (phoneMatch) {
+                    result.phone = phoneMatch[1];
+                    if (!result.phone.startsWith('+')) {
+                        result.phone = '+' + result.phone;
+                    }
+                }
+                
+                // Extract message text
+                let textMatch = url.match(/text=([^&]*)/);
+                if (textMatch) {
+                    const decodedText = decodeURIComponent(textMatch[1].replace(/\+/g, ' '));
+                    result.description = 'Mensaje WhatsApp: ' + decodedText;
+                    
+                    // If text looks like a name, use it
+                    if (decodedText.length < 50 && !decodedText.match(/\d/) && decodedText.split(' ').length <= 3) {
+                        result.name = decodedText;
+                    }
+                }
+                
+                // If no phone found, save full URL
+                if (!result.phone) {
+                    result.description = 'WhatsApp QR: ' + url;
+                }
+                
+            } catch (error) {
+                console.error('Error parsing WhatsApp URL:', error);
+                result.description = 'WhatsApp QR: ' + url;
+            }
+            
+            return result;
+        }
+
+        function stopQRScan() {
+            scanningQR = false;
+            const video = document.getElementById('qr-video');
+            const scanBtn = document.getElementById('scanQRBtn');
+            
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            document.getElementById('cameraContainer').classList.add('hidden');
+            scanBtn.textContent = '📸 Escanear Código QR';
+            scanBtn.onclick = startQRScan;
+            
+            vibrate([50]);
+        }
+
+        function fillFormFromQR(data) {
+            if (data.name) {
+                document.getElementById('leadName').value = data.name;
+                console.log('Nombre capturado:', data.name);
+            }
+            if (data.company) {
+                document.getElementById('leadCompany').value = data.company;
+                console.log('Empresa capturada:', data.company);
+            }
+            if (data.email) {
+                document.getElementById('leadEmail').value = data.email;
+                console.log('Email capturado:', data.email);
+            }
+            if (data.phone) {
+                document.getElementById('leadPhone').value = data.phone;
+                console.log('Teléfono capturado:', data.phone);
+            }
+            if (data.linkedin) {
+                document.getElementById('leadLinkedIn').value = data.linkedin;
+                console.log('LinkedIn capturado:', data.linkedin);
+            }
+            if (data.contactLink) {
+                document.getElementById('leadContactLink').value = data.contactLink;
+                document.getElementById('openContactLink').classList.remove('hidden');
+                
+                // Show appropriate buttons based on link type
+                if (data.linkType === 'WhatsApp') {
+                    document.getElementById('sendWhatsAppMessage').classList.remove('hidden');
+                } else {
+                    document.getElementById('sendWhatsAppMessage').classList.add('hidden');
+                }
+                
+                // Update button text based on type
+                const button = document.getElementById('openContactLink');
+                if (data.linkType === 'WhatsApp') {
+                    button.innerHTML = '💬 Abrir WhatsApp';
+                } else if (data.linkType === 'vCard') {
+                    button.innerHTML = '📇 Abrir vCard';
+                } else if (data.linkType === 'Email') {
+                    button.innerHTML = '📧 Abrir Email';
+                } else {
+                    button.innerHTML = '🔗 Abrir Link';
+                }
+                console.log('Link de contacto capturado:', data.contactLink);
+            }
+            if (data.description) {
+                const currentDesc = document.getElementById('leadDescription').value;
+                const newDesc = currentDesc ? currentDesc + '\n' + data.description : data.description;
+                document.getElementById('leadDescription').value = newDesc;
+                console.log('Descripción agregada:', data.description);
+            }
+        }
+
+        // Enhanced contact link opening
+        function openContactLink() {
+            const link = document.getElementById('leadContactLink').value;
+            if (link) {
+                try {
+                    window.open(link, '_blank', 'noopener,noreferrer');
+                    vibrate([100]);
+                } catch (error) {
+                    console.error('Error opening link:', error);
+                    showNotification('Error abriendo el link', 'error');
+                }
+            }
+        }
+
+        // Template management with enhanced mobile experience
+        const defaultTemplates = {
+            default: `Hola {nombre}! 👋
+
+Fue un placer conocerte en el evento. Soy {miNombre} de {miEmpresa}.
+
+Como conversamos, creo que podemos ayudarte con {oportunidad}. 
+
+¿Te parece si agendamos una llamada de 30 min esta semana para platicar más a detalle?
+
+Mis datos:
+📞 {miTelefono}
+📧 {miEmail}
+
+¡Saludos!`,
+
+            formal: `Estimado/a {nombre},
+
+Fue un placer conocerle en el evento. Mi nombre es {miNombre} y represento a {miEmpresa}.
+
+Basándome en nuestra conversación sobre {oportunidad}, creo que podríamos explorar oportunidades de colaboración.
+
+Me gustaría proponer una reunión de 30 minutos para discutir cómo podemos agregar valor a su organización.
+
+Quedo a su disposición:
+Teléfono: {miTelefono}
+Email: {miEmail}
+
+Cordialmente,
+{miNombre}`,
+
+            casual: `¡Hola {nombre}! 😊
+
+¡Qué bueno conocerte en el evento! Soy {miNombre} de {miEmpresa}.
+
+Me encantó nuestra charla sobre {oportunidad}. 
+
+¿Qué te parece si nos tomamos un café virtual esta semana para seguir platicando?
+
+Aquí mis datos:
+📱 {miTelefono}
+✉️ {miEmail}
+
+¡Espero tu respuesta!
+
+{miNombre}`,
+
+            custom: `Personaliza tu mensaje aquí...
+
+Usa las variables:
+- {nombre} para el nombre del contacto
+- {miNombre} para tu nombre
+- {miEmpresa} para tu empresa
+- etc.`
+        };
+
+        function loadSelectedTemplate() {
+            const selectedTemplate = document.getElementById('templateSelector').value;
+            const template = defaultTemplates[selectedTemplate] || defaultTemplates.default;
+            document.getElementById('whatsappTemplate').value = template;
+            vibrate([30]);
+        }
+
+        function createNewTemplate() {
+            const templateName = prompt('Nombre para la nueva plantilla:');
+            if (templateName && templateName.trim()) {
+                const selector = document.getElementById('templateSelector');
+                const option = document.createElement('option');
+                option.value = templateName.toLowerCase().replace(/\s+/g, '_');
+                option.textContent = templateName;
+                selector.appendChild(option);
+                selector.value = option.value;
+                
+                document.getElementById('whatsappTemplate').value = 'Nueva plantilla - personaliza tu mensaje aquí...';
+                showNotification('Nueva plantilla creada');
+                vibrate([100]);
+            }
+        }
+
+        function saveCurrentTemplate() {
+            try {
+                const templateData = {
+                    senderName: document.getElementById('senderName').value,
+                    senderCompany: document.getElementById('senderCompany').value,
+                    senderPhone: document.getElementById('senderPhone').value,
+                    senderEmail: document.getElementById('senderEmail').value,
+                    selectedTemplate: document.getElementById('templateSelector').value,
+                    customTemplate: document.getElementById('whatsappTemplate').value
+                };
+                
+                localStorage.setItem(`config_${currentUser}`, JSON.stringify(templateData));
+                showNotification('✓ Configuración guardada exitosamente!');
+                vibrate([100, 50, 100]);
+            } catch (error) {
+                console.error('Error saving template:', error);
+                showNotification('Error guardando configuración', 'error');
+            }
+        }
+
+        function loadConfiguration() {
+            try {
+                const saved = localStorage.getItem(`config_${currentUser}`);
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    document.getElementById('senderName').value = data.senderName || '';
+                    document.getElementById('senderCompany').value = data.senderCompany || '';
+                    document.getElementById('senderPhone').value = data.senderPhone || '';
+                    document.getElementById('senderEmail').value = data.senderEmail || '';
+                    document.getElementById('templateSelector').value = data.selectedTemplate || 'default';
+                    document.getElementById('whatsappTemplate').value = data.customTemplate || defaultTemplates.default;
+                } else {
+                    // Load default template
+                    document.getElementById('whatsappTemplate').value = defaultTemplates.default;
+                }
+            } catch (error) {
+                console.error('Error loading configuration:', error);
+                document.getElementById('whatsappTemplate').value = defaultTemplates.default;
+            }
+        }
+
+        function previewTemplate() {
+            const template = document.getElementById('whatsappTemplate').value;
+            const senderName = document.getElementById('senderName').value || '[Tu Nombre]';
+            const senderCompany = document.getElementById('senderCompany').value || '[Tu Empresa]';
+            const senderPhone = document.getElementById('senderPhone').value || '[Tu Teléfono]';
+            const senderEmail = document.getElementById('senderEmail').value || '[Tu Email]';
+            
+            const preview = template
+                .replace(/{nombre}/g, '[Nombre del Contacto]')
+                .replace(/{empresa}/g, '[Empresa del Contacto]')
+                .replace(/{miNombre}/g, senderName)
+                .replace(/{miEmpresa}/g, senderCompany)
+                .replace(/{miTelefono}/g, senderPhone)
+                .replace(/{miEmail}/g, senderEmail)
+                .replace(/{oportunidad}/g, '[Descripción de la Oportunidad]');
+            
+            // Use enhanced modal instead of alert for better mobile experience
+            showModal('Vista Previa del Mensaje', preview);
+            vibrate([50]);
+        }
+
+        // Enhanced modal for mobile
+        function showModal(title, content) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 2000;
+                padding: 20px;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: white;
+                border-radius: 15px;
+                padding: 25px;
+                max-width: 90%;
+                max-height: 80%;
+                overflow-y: auto;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            `;
+            
+            modalContent.innerHTML = `
+                <h3 style="color: #667eea; margin-bottom: 15px;">${title}</h3>
+                <div style="white-space: pre-wrap; line-height: 1.5; margin-bottom: 20px; font-size: 14px;">${content}</div>
+                <button onclick="this.closest('.modal').remove()" class="btn btn-primary" style="width: 100%;">Cerrar</button>
+            `;
+            
+            modal.className = 'modal';
+            modal.appendChild(modalContent);
+            document.body.appendChild(modal);
+            
+            // Close on background click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+
+        // Enhanced message preview and sending
+        function showMessagePreview() {
+            const contactLink = document.getElementById('leadContactLink').value;
+            const leadName = document.getElementById('leadName').value || 'amigo/a';
+            const leadCompany = document.getElementById('leadCompany').value || '';
+            const description = document.getElementById('leadDescription').value || 'tu proyecto';
+            
+            // Get sender data
+            const senderName = document.getElementById('senderName').value || '[Configura tu nombre]';
+            const senderCompany = document.getElementById('senderCompany').value || '[Configura tu empresa]';
+            const senderPhone = document.getElementById('senderPhone').value || '[Configura tu teléfono]';
+            const senderEmail = document.getElementById('senderEmail').value || '[Configura tu email]';
+            
+            // Get current template
+            const template = document.getElementById('whatsappTemplate').value || defaultTemplates.default;
+            
+            // Generate preview
+            const personalizedMessage = template
+                .replace(/{nombre}/g, leadName)
+                .replace(/{empresa}/g, leadCompany)
+                .replace(/{miNombre}/g, senderName)
+                .replace(/{miEmpresa}/g, senderCompany)
+                .replace(/{miTelefono}/g, senderPhone)
+                .replace(/{miEmail}/g, senderEmail)
+                .replace(/{oportunidad}/g, description);
+
+            // Create enhanced preview modal
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 2000;
+                padding: 20px;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: white;
+                border-radius: 15px;
+                padding: 25px;
+                max-width: 90%;
+                max-height: 80%;
+                overflow-y: auto;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            `;
+            
+            modalContent.innerHTML = `
+                <h3 style="color: #667eea; margin-bottom: 15px;">💬 Mensaje a Enviar</h3>
+                <div style="background: #f0f0f0; padding: 15px; border-radius: 10px; white-space: pre-wrap; line-height: 1.5; margin-bottom: 20px; font-size: 14px;">${personalizedMessage}</div>
+                <div style="display: flex; gap: 10px;">
+                    <button onclick="sendWhatsAppMessage('${personalizedMessage.replace(/'/g, "\\'")}', '${contactLink}'); this.closest('.modal').remove();" class="btn btn-success" style="flex: 1;">✅ Enviar</button>
+                    <button onclick="this.closest('.modal').remove()" class="btn btn-secondary" style="flex: 1;">❌ Cancelar</button>
+                </div>
+            `;
+            
+            modal.className = 'modal';
+            modal.appendChild(modalContent);
+            document.body.appendChild(modal);
+            
+            // Close on background click
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+            
+            vibrate([50]);
+        }
+
+        // Enhanced WhatsApp message sending
+        function sendWhatsAppMessage(message = null, contactLink = null) {
+            try {
+                const link = contactLink || document.getElementById('leadContactLink').value;
+                let finalMessage = message;
+                
+                if (!finalMessage) {
+                    const leadName = document.getElementById('leadName').value || 'amigo/a';
+                    const leadCompany = document.getElementById('leadCompany').value || '';
+                    const description = document.getElementById('leadDescription').value || 'tu proyecto';
+                    
+                    const senderName = document.getElementById('senderName').value || 'Usuario';
+                    const senderCompany = document.getElementById('senderCompany').value || 'Mi Empresa';
+                    const senderPhone = document.getElementById('senderPhone').value || 'No configurado';
+                    const senderEmail = document.getElementById('senderEmail').value || 'No configurado';
+                    
+                    const template = document.getElementById('whatsappTemplate').value || defaultTemplates.default;
+                    
+                    finalMessage = template
+                        .replace(/{nombre}/g, leadName)
+                        .replace(/{empresa}/g, leadCompany)
+                        .replace(/{miNombre}/g, senderName)
+                        .replace(/{miEmpresa}/g, senderCompany)
+                        .replace(/{miTelefono}/g, senderPhone)
+                        .replace(/{miEmail}/g, senderEmail)
+                        .replace(/{oportunidad}/g, description);
+                }
+
+                // Extract phone number from WhatsApp link
+                const phoneMatch = link.match(/(?:phone=|wa\.me\/)(\+?\d{8,15})/);
+                
+                if (phoneMatch) {
+                    const phone = phoneMatch[1];
+                    const encodedMessage = encodeURIComponent(finalMessage);
+                    const whatsappURL = `https://wa.me/${phone}?text=${encodedMessage}`;
+                    
+                    window.open(whatsappURL, '_blank', 'noopener,noreferrer');
+                    showNotification('Abriendo WhatsApp...');
+                    vibrate([100, 50, 100]);
+                } else {
+                    showNotification('No se pudo extraer el número de WhatsApp', 'error');
+                }
+            } catch (error) {
+                console.error('Error sending WhatsApp message:', error);
+                showNotification('Error enviando mensaje', 'error');
+            }
+        }
+
+        // Enhanced LinkedIn search
+        function searchLinkedIn() {
+            const name = document.getElementById('leadName').value;
+            if (name && name.trim()) {
+                try {
+                    const linkedInURL = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name.trim())}`;
+                    window.open(linkedInURL, '_blank', 'noopener,noreferrer');
+                    showNotification('Abriendo búsqueda en LinkedIn...');
+                    vibrate([100]);
+                } catch (error) {
+                    console.error('Error opening LinkedIn:', error);
+                    showNotification('Error abriendo LinkedIn', 'error');
+                }
+            } else {
+                showNotification('Primero ingresa el nombre para buscar', 'error');
+            }
+        }
+
+        // Enhanced voice recording with mobile optimizations
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    } 
+                });
+                
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+                recordedChunks = [];
+
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                });
+
+                mediaRecorder.addEventListener('stop', () => {
+                    currentAudioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    document.getElementById('playBtn').classList.remove('hidden');
+                    document.getElementById('recordingStatus').innerHTML = '<span class="success">✓ Grabación guardada</span>';
+                    vibrate([200]);
+                });
+
+                mediaRecorder.start(1000); // Capture data every second
+                document.getElementById('recordBtn').classList.add('hidden');
+                document.getElementById('stopBtn').classList.remove('hidden');
+                document.getElementById('recordingStatus').innerHTML = '<span style="color: red;">🔴 Grabando...</span>';
+                
+                showNotification('Grabación iniciada');
+                vibrate([100]);
+
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                showNotification('Error accediendo al micrófono: ' + error.message, 'error');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            document.getElementById('recordBtn').classList.remove('hidden');
+            document.getElementById('stopBtn').classList.add('hidden');
+            
+            showNotification('Grabación detenida');
+            vibrate([50, 50, 50]);
+        }
+
+        function playRecording() {
+            if (currentAudioBlob) {
+                try {
+                    const audio = new Audio(URL.createObjectURL(currentAudioBlob));
+                    audio.play();
+                    showNotification('Reproduciendo grabación...');
+                    vibrate([50]);
+                } catch (error) {
+                    console.error('Error playing recording:', error);
+                    showNotification('Error reproduciendo grabación', 'error');
+                }
+            }
+        }
+
+        // Enhanced lead management
+        document.getElementById('leadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            try {
+                const lead = {
+                    id: Date.now(),
+                    name: document.getElementById('leadName').value,
+                    company: document.getElementById('leadCompany').value,
+                    email: document.getElementById('leadEmail').value,
+                    phone: document.getElementById('lea
