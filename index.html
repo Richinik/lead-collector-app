@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lead Collector - Event Manager</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qr-code-scanner/1.0.0-alpha.1/qr-scanner.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .app-header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            padding-top: 20px;
+        }
+        
+        .app-header h1 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+        
+        .app-header p {
+            opacity: 0.9;
+            font-size: 0.9rem;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e1e1;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 10px;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+        
+        .btn-secondary {
+            background: #f8f9fa;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+        
+        .btn-secondary:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        .lead-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .lead-item h4 {
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .lead-item p {
+            margin: 3px 0;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .camera-container {
+            position: relative;
+            width: 100%;
+            height: 250px;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            background: #f8f9fa;
+        }
+        
+        #qr-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 6px;
+        }
+        
+        .recording-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .recording-controls button {
+            flex: 1;
+            padding: 10px;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            background: white;
+            border-radius: 10px;
+            padding: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .nav-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        .nav-tab.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .error {
+            color: #dc3545;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        
+        .success {
+            color: #28a745;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        
+        .lead-count {
+            background: #667eea;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="app-header">
+            <h1>📱 Lead Collector</h1>
+            <p>Captura leads en eventos</p>
+        </div>
+
+        <!-- Login Screen -->
+        <div id="loginScreen" class="card">
+            <h2 style="text-align: center; margin-bottom: 25px; color: #667eea;">Iniciar Sesión</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Usuario:</label>
+                    <input type="text" id="username" required placeholder="Ingresa tu usuario">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña:</label>
+                    <input type="password" id="password" required placeholder="Ingresa tu contraseña">
+                </div>
+                <button type="submit" class="btn btn-primary">Ingresar</button>
+                <button type="button" class="btn btn-secondary" onclick="showRegister()">Registrarse</button>
+            </form>
+        </div>
+
+        <!-- Register Screen -->
+        <div id="registerScreen" class="card hidden">
+            <h2 style="text-align: center; margin-bottom: 25px; color: #667eea;">Registro</h2>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Usuario:</label>
+                    <input type="text" id="regUsername" required placeholder="Crea tu usuario">
+                </div>
+                <div class="form-group">
+                    <label>Email:</label>
+                    <input type="email" id="regEmail" required placeholder="tu@email.com">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña:</label>
+                    <input type="password" id="regPassword" required placeholder="Crea una contraseña">
+                </div>
+                <button type="submit" class="btn btn-primary">Registrarse</button>
+                <button type="button" class="btn btn-secondary" onclick="showLogin()">Ya tengo cuenta</button>
+            </form>
+        </div>
+
+        <!-- Main App -->
+        <div id="mainApp" class="hidden">
+            <div class="lead-count">
+                <span id="leadCount">0</span> leads capturados
+            </div>
+
+            <div class="nav-tabs">
+                <div class="nav-tab active" onclick="showTab('capture')">Capturar</div>
+                <div class="nav-tab" onclick="showTab('list')">Lista</div>
+                <div class="nav-tab" onclick="showTab('export')">Exportar</div>
+            </div>
+
+            <!-- Capture Tab -->
+            <div id="captureTab" class="card">
+                <h3 style="margin-bottom: 20px; color: #667eea;">Nuevo Lead</h3>
+                
+                <button id="scanQRBtn" class="btn btn-secondary" onclick="startQRScan()">
+                    📸 Escanear Código QR
+                </button>
+                
+                <div id="cameraContainer" class="camera-container hidden">
+                    <video id="qr-video"></video>
+                </div>
+
+                <form id="leadForm">
+                    <div class="form-group">
+                        <label>Nombre Completo:</label>
+                        <input type="text" id="leadName" required placeholder="Nombre del contacto">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Empresa:</label>
+                        <input type="text" id="leadCompany" placeholder="Nombre de la empresa">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Email:</label>
+                        <input type="email" id="leadEmail" placeholder="email@empresa.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Teléfono:</label>
+                        <input type="tel" id="leadPhone" placeholder="+1234567890">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>LinkedIn:</label>
+                        <input type="url" id="leadLinkedIn" placeholder="https://linkedin.com/in/usuario">
+                        <button type="button" class="btn btn-secondary" onclick="searchLinkedIn()" style="margin-top: 10px;">
+                            🔍 Buscar en LinkedIn
+                        </button>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Descripción de la Oportunidad:</label>
+                        <textarea id="leadDescription" rows="4" placeholder="Describe la conversación y puntos clave..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Nota de Voz:</label>
+                        <div class="recording-controls">
+                            <button type="button" id="recordBtn" class="btn btn-secondary" onclick="startRecording()">
+                                🎤 Grabar
+                            </button>
+                            <button type="button" id="stopBtn" class="btn btn-danger hidden" onclick="stopRecording()">
+                                ⏹️ Parar
+                            </button>
+                            <button type="button" id="playBtn" class="btn btn-secondary hidden" onclick="playRecording()">
+                                ▶️ Reproducir
+                            </button>
+                        </div>
+                        <div id="recordingStatus"></div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">💾 Guardar Lead</button>
+                </form>
+            </div>
+
+            <!-- List Tab -->
+            <div id="listTab" class="card hidden">
+                <h3 style="margin-bottom: 20px; color: #667eea;">Lista de Leads</h3>
+                <div id="leadsList"></div>
+            </div>
+
+            <!-- Export Tab -->
+            <div id="exportTab" class="card hidden">
+                <h3 style="margin-bottom: 20px; color: #667eea;">Exportar Datos</h3>
+                <button class="btn btn-success" onclick="exportToCSV()">
+                    📊 Descargar CSV
+                </button>
+                <button class="btn btn-secondary" onclick="logout()" style="margin-top: 20px;">
+                    🚪 Cerrar Sesión
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentUser = null;
+        let leads = [];
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let currentAudioBlob = null;
+        let qrScanner = null;
+
+        // Load data from localStorage
+        function loadData() {
+            const savedLeads = localStorage.getItem(`leads_${currentUser}`);
+            if (savedLeads) {
+                leads = JSON.parse(savedLeads);
+            }
+            updateLeadCount();
+            displayLeads();
+        }
+
+        // Save data to localStorage
+        function saveData() {
+            localStorage.setItem(`leads_${currentUser}`, JSON.stringify(leads));
+        }
+
+        // Authentication
+        function showLogin() {
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('registerScreen').classList.add('hidden');
+        }
+
+        function showRegister() {
+            document.getElementById('registerScreen').classList.remove('hidden');
+            document.getElementById('loginScreen').classList.add('hidden');
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            const users = JSON.parse(localStorage.getItem('users') || '{}');
+            
+            if (users[username] && users[username].password === password) {
+                currentUser = username;
+                document.getElementById('loginScreen').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                loadData();
+            } else {
+                alert('Usuario o contraseña incorrectos');
+            }
+        });
+
+        document.getElementById('registerForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+            
+            const users = JSON.parse(localStorage.getItem('users') || '{}');
+            
+            if (users[username]) {
+                alert('El usuario ya existe');
+                return;
+            }
+            
+            users[username] = { email, password };
+            localStorage.setItem('users', JSON.stringify(users));
+            
+            alert('Usuario registrado exitosamente');
+            showLogin();
+        });
+
+        // Tab navigation
+        function showTab(tab) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('[id$="Tab"]').forEach(t => t.classList.add('hidden'));
+            
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Tab').classList.remove('hidden');
+            
+            if (tab === 'list') {
+                displayLeads();
+            }
+        }
+
+        // QR Code Scanner
+        async function startQRScan() {
+            try {
+                const cameraContainer = document.getElementById('cameraContainer');
+                const video = document.getElementById('qr-video');
+                
+                cameraContainer.classList.remove('hidden');
+                document.getElementById('scanQRBtn').textContent = '⏹️ Parar Escaneo';
+                document.getElementById('scanQRBtn').onclick = stopQRScan;
+
+                // Simple camera access for QR scanning
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+                video.play();
+
+                // Simulate QR detection (you'd use a real QR library here)
+                setTimeout(() => {
+                    // Mock QR data - in real app, this would come from QR scanner
+                    const mockQRData = {
+                        name: "Juan Pérez",
+                        company: "Tech Solutions",
+                        email: "juan@techsolutions.com",
+                        phone: "+1234567890"
+                    };
+                    fillFormFromQR(mockQRData);
+                    stopQRScan();
+                }, 3000);
+
+            } catch (error) {
+                alert('Error accediendo a la cámara: ' + error.message);
+            }
+        }
+
+        function stopQRScan() {
+            const video = document.getElementById('qr-video');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            document.getElementById('cameraContainer').classList.add('hidden');
+            document.getElementById('scanQRBtn').textContent = '📸 Escanear Código QR';
+            document.getElementById('scanQRBtn').onclick = startQRScan;
+        }
+
+        function fillFormFromQR(data) {
+            if (data.name) document.getElementById('leadName').value = data.name;
+            if (data.company) document.getElementById('leadCompany').value = data.company;
+            if (data.email) document.getElementById('leadEmail').value = data.email;
+            if (data.phone) document.getElementById('leadPhone').value = data.phone;
+        }
+
+        // LinkedIn Search
+        function searchLinkedIn() {
+            const name = document.getElementById('leadName').value;
+            if (name) {
+                const linkedInURL = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(name)}`;
+                window.open(linkedInURL, '_blank');
+            } else {
+                alert('Primero ingresa el nombre para buscar');
+            }
+        }
+
+        // Voice Recording
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                recordedChunks = [];
+
+                mediaRecorder.addEventListener('dataavailable', event => {
+                    recordedChunks.push(event.data);
+                });
+
+                mediaRecorder.addEventListener('stop', () => {
+                    currentAudioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    document.getElementById('playBtn').classList.remove('hidden');
+                    document.getElementById('recordingStatus').innerHTML = '<span class="success">Grabación guardada ✓</span>';
+                });
+
+                mediaRecorder.start();
+                document.getElementById('recordBtn').classList.add('hidden');
+                document.getElementById('stopBtn').classList.remove('hidden');
+                document.getElementById('recordingStatus').innerHTML = '<span style="color: red;">🔴 Grabando...</span>';
+
+            } catch (error) {
+                alert('Error accediendo al micrófono: ' + error.message);
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            document.getElementById('recordBtn').classList.remove('hidden');
+            document.getElementById('stopBtn').classList.add('hidden');
+        }
+
+        function playRecording() {
+            if (currentAudioBlob) {
+                const audio = new Audio(URL.createObjectURL(currentAudioBlob));
+                audio.play();
+            }
+        }
+
+        // Lead Management
+        document.getElementById('leadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const lead = {
+                id: Date.now(),
+                name: document.getElementById('leadName').value,
+                company: document.getElementById('leadCompany').value,
+                email: document.getElementById('leadEmail').value,
+                phone: document.getElementById('leadPhone').value,
+                linkedin: document.getElementById('leadLinkedIn').value,
+                description: document.getElementById('leadDescription').value,
+                audioBlob: currentAudioBlob ? URL.createObjectURL(currentAudioBlob) : null,
+                timestamp: new Date().toLocaleString()
+            };
+            
+            leads.push(lead);
+            saveData();
+            updateLeadCount();
+            
+            // Clear form
+            document.getElementById('leadForm').reset();
+            currentAudioBlob = null;
+            document.getElementById('playBtn').classList.add('hidden');
+            document.getElementById('recordingStatus').innerHTML = '';
+            
+            alert('Lead guardado exitosamente!');
+        });
+
+        function updateLeadCount() {
+            document.getElementById('leadCount').textContent = leads.length;
+        }
+
+        function displayLeads() {
+            const leadsList = document.getElementById('leadsList');
+            if (leads.length === 0) {
+                leadsList.innerHTML = '<p style="text-align: center; color: #666;">No hay leads guardados</p>';
+                return;
+            }
+            
+            leadsList.innerHTML = leads.map(lead => `
+                <div class="lead-item">
+                    <h4>${lead.name}</h4>
+                    <p><strong>Empresa:</strong> ${lead.company || 'No especificada'}</p>
+                    <p><strong>Email:</strong> ${lead.email || 'No especificado'}</p>
+                    <p><strong>Teléfono:</strong> ${lead.phone || 'No especificado'}</p>
+                    <p><strong>Descripción:</strong> ${lead.description || 'Sin descripción'}</p>
+                    <p><strong>Fecha:</strong> ${lead.timestamp}</p>
+                    ${lead.audioBlob ? `<audio controls style="width: 100%; margin-top: 10px;"><source src="${lead.audioBlob}" type="audio/webm"></audio>` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Export to CSV
+        function exportToCSV() {
+            if (leads.length === 0) {
+                alert('No hay leads para exportar');
+                return;
+            }
+            
+            const headers = ['Nombre', 'Empresa', 'Email', 'Teléfono', 'LinkedIn', 'Descripción', 'Fecha'];
+            const csvContent = [
+                headers.join(','),
+                ...leads.map(lead => [
+                    `"${lead.name || ''}"`,
+                    `"${lead.company || ''}"`,
+                    `"${lead.email || ''}"`,
+                    `"${lead.phone || ''}"`,
+                    `"${lead.linkedin || ''}"`,
+                    `"${lead.description || ''}"`,
+                    `"${lead.timestamp || ''}"`
+                ].join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `leads_${currentUser}_${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+
+        function logout() {
+            currentUser = null;
+            leads = [];
+            document.getElementById('mainApp').classList.add('hidden');
+            document.getElementById('loginScreen').classList.remove('hidden');
+            document.getElementById('loginForm').reset();
+        }
+
+        // Initialize app
+        window.addEventListener('load', function() {
+            showLogin();
+        });
+    </script>
+</body>
+</html>
