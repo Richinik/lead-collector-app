@@ -268,6 +268,50 @@
             font-weight: 600;
             font-size: 1rem;
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+        
+        .lead-count:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .lead-count:active {
+            transform: translateY(0);
+        }
+        
+        .lead-count-text {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .view-list-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 15px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .view-list-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+        
+        .view-list-btn:active {
+            transform: scale(0.95);
         }
         
         /* Mobile optimizations */
@@ -401,8 +445,13 @@
 
         <!-- Main App -->
         <div id="mainApp" class="hidden">
-            <div class="lead-count">
-                <span id="leadCount">0</span> leads capturados
+            <div class="lead-count" onclick="showTab('list')">
+                <div class="lead-count-text">
+                    <span id="leadCount">0</span> leads capturados
+                </div>
+                <button class="view-list-btn" onclick="event.stopPropagation(); showTab('list')">
+                    📋 Ver lista
+                </button>
             </div>
 
             <div class="nav-tabs">
@@ -741,7 +790,7 @@
             }
         });
 
-        // Tab navigation with enhanced mobile experience
+        // Enhanced tab navigation with quick access
         function showTab(tab) {
             // Remove active state from all tabs
             document.querySelectorAll('.nav-tab').forEach(t => {
@@ -752,7 +801,11 @@
             });
             
             // Add active state to clicked tab
-            event.target.classList.add('active');
+            const activeTab = document.querySelector(`[onclick="showTab('${tab}')"]`);
+            if (activeTab && activeTab.classList.contains('nav-tab')) {
+                activeTab.classList.add('active');
+            }
+            
             document.getElementById(tab + 'Tab').classList.remove('hidden');
             
             // Vibration feedback
@@ -761,6 +814,7 @@
             // Load content for specific tabs
             if (tab === 'list') {
                 displayLeads();
+                showNotification(`Mostrando ${leads.length} leads`);
             } else if (tab === 'config') {
                 loadConfiguration();
             }
